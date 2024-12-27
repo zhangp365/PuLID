@@ -293,8 +293,9 @@ def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callback=None, disable=No
             denoised_d = (1 + 1 / (2 * r)) * denoised - (1 / (2 * r)) * old_denoised
             x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised_d
         old_denoised = denoised
-    if XLA_AVAILABLE:
-        xm.mark_step()
+        if XLA_AVAILABLE:
+            print("sample_dpmpp_2m xla mark step")
+            xm.mark_step()
     return x
 
 
