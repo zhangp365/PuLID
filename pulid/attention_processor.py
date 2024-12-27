@@ -208,7 +208,6 @@ class AttnProcessor2_0(nn.Module):
         id_scale=1.0,
     ):
         residual = hidden_states
-
         if attn.spatial_norm is not None:
             hidden_states = attn.spatial_norm(hidden_states, temb)
 
@@ -353,12 +352,10 @@ class IDAttnProcessor2_0(torch.nn.Module):
 
         # for id embedding
         if id_embedding is not None:
-            print(f"id_embedding type: {id_embedding.dtype}, id_embedding device: {id_embedding.device}, query type: {query.dtype}, query device: {query.device}")
-            id_embedding = id_embedding.to(query.dtype).to(query.device)
             if NUM_ZERO == 0:
                 id_key = self.id_to_k(id_embedding).to(query.dtype)
                 id_value = self.id_to_v(id_embedding).to(query.dtype)
-            else:                
+            else:
                 zero_tensor = torch.zeros(
                     (id_embedding.size(0), NUM_ZERO, id_embedding.size(-1)),
                     dtype=id_embedding.dtype,
@@ -407,6 +404,7 @@ class IDAttnProcessor2_0(torch.nn.Module):
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
                 hidden_states = hidden_states.to(orig_dtype)
+            del id_key, id_value, id_hidden_states
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
