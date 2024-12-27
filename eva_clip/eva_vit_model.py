@@ -23,12 +23,13 @@ if os.getenv('ENV_TYPE') == 'deepspeed':
 else:
     from torch.utils.checkpoint import checkpoint
 
-try:
-    import xformers
-    import xformers.ops as xops
-    XFORMERS_IS_AVAILBLE = True
-except:
-    XFORMERS_IS_AVAILBLE = False
+# try:
+#     import xformers
+#     import xformers.ops as xops
+#     XFORMERS_IS_AVAILBLE = True
+# except:
+#     XFORMERS_IS_AVAILBLE = False
+XFORMERS_IS_AVAILBLE = False
 
 class DropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
