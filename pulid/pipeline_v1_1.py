@@ -148,7 +148,7 @@ class PuLIDPipeline:
                     cross_attention_dim=cross_attention_dim,
                 ).to(unet.device)
             else:
-                id_adapter_attn_procs[name] = AttnProcessor()
+                id_adapter_attn_procs[name] = AttnProcessor().to(unet.device)
         unet.set_attn_processor(id_adapter_attn_procs)
         self.id_adapter_attn_layers = nn.ModuleList(unet.attn_processors.values())
 
