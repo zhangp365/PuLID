@@ -353,10 +353,12 @@ class IDAttnProcessor2_0(torch.nn.Module):
 
         # for id embedding
         if id_embedding is not None:
+            print(f"id_embedding type: {id_embedding.dtype}, id_embedding device: {id_embedding.device}, query type: {query.dtype}, query device: {query.device}")
+            id_embedding = id_embedding.to(query.dtype).to(query.device)
             if NUM_ZERO == 0:
                 id_key = self.id_to_k(id_embedding).to(query.dtype)
                 id_value = self.id_to_v(id_embedding).to(query.dtype)
-            else:
+            else:                
                 zero_tensor = torch.zeros(
                     (id_embedding.size(0), NUM_ZERO, id_embedding.size(-1)),
                     dtype=id_embedding.dtype,
