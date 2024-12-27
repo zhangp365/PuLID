@@ -11,14 +11,22 @@ import torchsde
 from torchvision.utils import make_grid
 from tqdm.auto import trange
 from transformers import PretrainedConfig
+import logging
+logger = logging.getLogger(__name__)
 
+try:
+    import torch_xla.core.xla_model as xm
+    XLA_AVAILABLE = True
+except:
+    XLA_AVAILABLE = False
+logger.info(f"scheduler sample XLA_AVAILABLE: {XLA_AVAILABLE}")
 
 def seed_everything(seed):
     os.environ["PL_GLOBAL_SEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    #torch.cuda.manual_seed_all(seed)
 
 
 def is_torch2_available():
@@ -285,6 +293,8 @@ def sample_dpmpp_2m(model, x, sigmas, extra_args=None, callback=None, disable=No
             denoised_d = (1 + 1 / (2 * r)) * denoised - (1 / (2 * r)) * old_denoised
             x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised_d
         old_denoised = denoised
+    if XLA_AVAILABLE:
+        xm.mark_step()
     return x
 
 
@@ -334,4 +344,6 @@ def sample_dpmpp_sde(
             denoised_d = (1 - fac) * denoised + fac * denoised_2
             x = (sigma_fn(t_next_) / sigma_fn(t)) * x - (t - t_next_).expm1() * denoised_d
             x = x + noise_sampler(sigma_fn(t), sigma_fn(t_next)) * s_noise * su
+        if XLA_AVAILABLE:
+            xm.mark_step()
     return x

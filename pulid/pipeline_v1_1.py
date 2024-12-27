@@ -1,11 +1,12 @@
 import gc
 
+import time
 import cv2
 import insightface
 import numpy as np
 import torch
 import torch.nn as nn
-from basicsr.utils import img2tensor, tensor2img
+#from basicsr.utils import img2tensor, tensor2img
 from diffusers import DPMSolverMultistepScheduler, StableDiffusionXLPipeline
 from facexlib.parsing import init_parsing_model
 from facexlib.utils.face_restoration_helper import FaceRestoreHelper
@@ -21,6 +22,10 @@ from eva_clip.constants import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
 from pulid.encoders_transformer import IDFormer
 from pulid.utils import is_torch2_available, sample_dpmpp_2m, sample_dpmpp_sde
 
+import torch_xla.core.xla_model as xm
+from torchvision import transforms
+to_tensor = transforms.ToTensor()
+
 if is_torch2_available():
     from pulid.attention_processor import AttnProcessor2_0 as AttnProcessor
     from pulid.attention_processor import IDAttnProcessor2_0 as IDAttnProcessor
@@ -29,22 +34,17 @@ else:
 
 
 class PuLIDPipeline:
-    def __init__(self, sdxl_repo='Lykon/dreamshaper-xl-lightning', sampler='dpmpp_sde', *args, **kwargs):
+    def __init__(self, sdxl_repo='Lykon/dreamshaper-xl-lightning', sampler='dpmpp_2m', device='xla', *args, **kwargs):
         super().__init__()
-        self.device = 'cuda'
+        self.device = device
 
         # load base model
-        self.pipe = StableDiffusionXLPipeline.from_pretrained(sdxl_repo, torch_dtype=torch.float16, variant="fp16").to(
-            self.device
-        )
+        self.pipe = StableDiffusionXLPipeline.from_pretrained(sdxl_repo, torch_dtype=torch.bfloat16, variant="fp16")
         self.pipe.watermark = None
         self.hack_unet_attn_layers(self.pipe.unet)
 
-        # scheduler
-        self.pipe.scheduler = DPMSolverMultistepScheduler.from_config(self.pipe.scheduler.config)
-
         # ID adapters
-        self.id_adapter = IDFormer().to(self.device)
+        self.id_adapter = IDFormer()
 
         # preprocessors
         # face align and parsing
@@ -54,14 +54,18 @@ class PuLIDPipeline:
             crop_ratio=(1, 1),
             det_model='retinaface_resnet50',
             save_ext='png',
-            device=self.device,
+            device="cpu",
         )
         self.face_helper.face_parse = None
-        self.face_helper.face_parse = init_parsing_model(model_name='bisenet', device=self.device)
+        self.face_helper.face_parse = init_parsing_model(model_name='bisenet', device="cpu")
         # clip-vit backbone
         model, _, _ = create_model_and_transforms('EVA02-CLIP-L-14-336', 'eva_clip', force_custom_clip=True)
         model = model.visual
-        self.clip_vision_model = model.to(self.device)
+        model.eval()  # 设置为评估模式
+        for param in model.parameters():  # 确保添加这行关闭grad
+            param.requires_grad = False
+        model = model.to("cpu")
+        self.clip_vision_model = model
         eva_transform_mean = getattr(self.clip_vision_model, 'image_mean', OPENAI_DATASET_MEAN)
         eva_transform_std = getattr(self.clip_vision_model, 'image_std', OPENAI_DATASET_STD)
         if not isinstance(eva_transform_mean, (list, tuple)):
@@ -80,7 +84,7 @@ class PuLIDPipeline:
         self.handler_ante.prepare(ctx_id=0)
 
         gc.collect()
-        torch.cuda.empty_cache()
+        #torch.cuda.empty_cache()
 
         self.load_pretrain()
 
@@ -208,13 +212,12 @@ class PuLIDPipeline:
                 print('fail to detect face using insightface, extract embedding on align face')
                 id_ante_embedding = self.handler_ante.get_feat(align_face)
 
-            id_ante_embedding = torch.from_numpy(id_ante_embedding).to(self.device)
+            id_ante_embedding = torch.from_numpy(id_ante_embedding)
             if id_ante_embedding.ndim == 1:
                 id_ante_embedding = id_ante_embedding.unsqueeze(0)
 
             # parsing
-            input = img2tensor(align_face, bgr2rgb=True).unsqueeze(0) / 255.0
-            input = input.to(self.device)
+            input = to_tensor(cv2.cvtColor(align_face, cv2.COLOR_BGR2RGB)).unsqueeze(0)
             parsing_out = self.face_helper.face_parse(normalize(input, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))[
                 0
             ]
@@ -224,9 +227,8 @@ class PuLIDPipeline:
             white_image = torch.ones_like(input)
             # only keep the face features
             face_features_image = torch.where(bg, white_image, self.to_gray(input))
-            self.debug_img_list.append(tensor2img(face_features_image, rgb2bgr=False))
+            self.debug_img_list.append((face_features_image[0].cpu().numpy() * 255).astype(np.uint8).transpose(1, 2, 0))
 
-            # transform img before sending to eva-clip-vit
             face_features_image = resize(
                 face_features_image, self.clip_vision_model.image_size, InterpolationMode.BICUBIC
             )
@@ -267,6 +269,16 @@ class PuLIDPipeline:
         noise_pred = eps_negative + cfg_scale * (eps_positive - eps_negative)
         return x - noise_pred * sigma[:, None, None, None]
 
+    def to_device(self, data, device):
+        if isinstance(data, dict):
+            return {k: self.to_device(v, device) for k, v in data.items()}
+        elif isinstance(data, (list, tuple)):
+            return type(data)(self.to_device(x, device) for x in data)
+        elif isinstance(data, torch.Tensor):
+            return data.to(device)
+        return data
+
+    @torch.no_grad()
     def inference(
         self,
         prompt,
@@ -279,6 +291,7 @@ class PuLIDPipeline:
         steps=4,
         seed=-1,
     ):
+        t0 = time.time()
 
         # sigmas
         sigmas = self.get_sigmas_karras(steps).to(self.device)
@@ -298,6 +311,17 @@ class PuLIDPipeline:
             negative_prompt=prompt_n,
         )
 
+        # 处理id_embedding和uncond_id_embedding
+        if isinstance(id_embedding, (list, tuple)):
+            id_embedding = [emb.clone().to(self.device) if isinstance(emb, torch.Tensor) else emb for emb in id_embedding]
+        elif isinstance(id_embedding, torch.Tensor):
+            id_embedding = id_embedding.clone().to(self.device)
+
+        if isinstance(uncond_id_embedding, (list, tuple)):
+            uncond_id_embedding = [emb.clone().to(self.device) if isinstance(emb, torch.Tensor) else emb for emb in uncond_id_embedding]
+        elif isinstance(uncond_id_embedding, torch.Tensor):
+            uncond_id_embedding = uncond_id_embedding.clone().to(self.device)
+
         add_time_ids = list((size[1], size[2]) + (0, 0) + (size[1], size[2]))
         add_time_ids = torch.tensor([add_time_ids], dtype=self.pipe.unet.dtype, device=self.device)
         add_neg_time_ids = add_time_ids.clone()
@@ -315,10 +339,26 @@ class PuLIDPipeline:
                 cross_attention_kwargs={'id_embedding': uncond_id_embedding, 'id_scale': id_scale},
             ),
         )
+        # 将所有tensor移到正确的设备上
+        sampler_kwargs = self.to_device(sampler_kwargs, self.device)
+
+        self.pipe.unet.to(self.device)
+        self.pipe.vae.to(self.device)
+        
+        t1 = time.time()
+        print(f"Face & test anylysis time: {t1-t0:.2f}s")
 
         latents = self.sampler(self, latents, sigmas, extra_args=sampler_kwargs, disable=False)
+
+        t2 = time.time()
+        print(f"Sampling time: {t2-t1:.2f}s")
+
         latents = latents.to(dtype=self.pipe.vae.dtype, device=self.device) / self.pipe.vae.config.scaling_factor
         images = self.pipe.vae.decode(latents).sample
+
+        t3 = time.time()
+        print(f"Decode time: {t3-t2:.2f}s")
+
         images = self.pipe.image_processor.postprocess(images, output_type='pil')
 
         return images
