@@ -379,7 +379,7 @@ class IDAttnProcessor2_0(torch.nn.Module):
         # for id embedding
         if id_embedding is not None:
             t_start = time.time()
-            id_key, id_value = id_embedding[self.key]["to_k"], id_embedding[self.key]["to_v"]
+            id_key, id_value = id_embedding[self.key][0], id_embedding[self.key][1]
             
             t2 = time.time()
             id_key = id_key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
