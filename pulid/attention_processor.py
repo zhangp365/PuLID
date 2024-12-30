@@ -294,7 +294,7 @@ class AttnProcessor2_0(nn.Module):
             hidden_states = hidden_states + residual
 
         hidden_states = hidden_states / attn.rescale_output_factor
-        del query, key, value, residual
+
         return hidden_states
 
 
@@ -495,5 +495,5 @@ class IDAttnProcessor2_0(torch.nn.Module):
             hidden_states = hidden_states + residual
 
         hidden_states = hidden_states / attn.rescale_output_factor
-        del query, key, value, residual
+
         return hidden_states
