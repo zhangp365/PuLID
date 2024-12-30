@@ -382,7 +382,7 @@ class IDAttnProcessor2_0(torch.nn.Module):\
             else:
                 id_key, id_value = id_embedding[self.key:self.key +1,...], id_embedding[self.key+1:self.key +2,...]
 
-            print("id_key.shape", id_key.shape,"id_value.shape", id_value.shape)
+            # print("id_key.shape", id_key.shape,"id_value.shape", id_value.shape)
             t2 = time.time()
             id_key = id_key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
             id_value = id_value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
