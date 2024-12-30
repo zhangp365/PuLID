@@ -298,10 +298,7 @@ class AttnProcessor2_0(nn.Module):
         return hidden_states
 
 
-class IDAttnProcessor2_0(torch.nn.Module):
-    _cache = {}
-    _instance_count = 0
-    _last_embedding_key = None  # 添加类变量来记录上一次的embedding特征
+class IDAttnProcessor2_0(torch.nn.Module):\
 
     def __init__(self, hidden_size, cross_attention_dim=None, key=None):
         super().__init__()
@@ -310,7 +307,8 @@ class IDAttnProcessor2_0(torch.nn.Module):
         
         # 为每个实例创建唯一标识符
         self.key = key
-        
+        self.hidden_size = hidden_size
+
         print("cross_attention_dim", cross_attention_dim,"hidden_size", hidden_size)
         self.id_to_k = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
         self.id_to_v = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
@@ -379,8 +377,12 @@ class IDAttnProcessor2_0(torch.nn.Module):
         # for id embedding
         if id_embedding is not None:
             t_start = time.time()
-            id_key, id_value = id_embedding[self.key][0], id_embedding[self.key][1]
-            
+            if self.hidden_size == 1280:
+                id_key, id_value = id_embedding[self.key:self.key +2,...], id_embedding[self.key+2:self.key +4,...]
+            else:
+                id_key, id_value = id_embedding[self.key:self.key +1,...], id_embedding[self.key+1:self.key +2,...]
+
+            print("id_key.shape", id_key.shape,"id_value.shape", id_value.shape)
             t2 = time.time()
             id_key = id_key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
             id_value = id_value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
