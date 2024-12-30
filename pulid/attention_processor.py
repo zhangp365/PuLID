@@ -303,71 +303,17 @@ class IDAttnProcessor2_0(torch.nn.Module):
     _instance_count = 0
     _last_embedding_key = None  # 添加类变量来记录上一次的embedding特征
 
-    def __init__(self, hidden_size, cross_attention_dim=None):
+    def __init__(self, hidden_size, cross_attention_dim=None, key=None):
         super().__init__()
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("AttnProcessor2_0 requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
         
         # 为每个实例创建唯一标识符
-        self.instance_id = IDAttnProcessor2_0._instance_count
-        IDAttnProcessor2_0._instance_count += 1
+        self.key = key
         
         print("cross_attention_dim", cross_attention_dim,"hidden_size", hidden_size)
         self.id_to_k = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
         self.id_to_v = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
-
-    def _get_cache_key(self, id_embedding):
-        # 创建缓存键
-        return (self.instance_id, id_embedding.shape, id_embedding.sum().item())
-
-    def _get_embedding_key(self, id_embedding):
-        # 获取embedding的特征值
-        return (id_embedding.shape, id_embedding.sum().item())
-
-    def _compute_id_projections(self, id_embedding, query_dtype):
-        # 检查id_embedding是否发生变化
-        current_key = self._get_embedding_key(id_embedding)
-        if IDAttnProcessor2_0._last_embedding_key is not None and current_key != IDAttnProcessor2_0._last_embedding_key:
-            print("检测到新的id_embedding，清空缓存...")
-            self._cache.clear()
-        IDAttnProcessor2_0._last_embedding_key = current_key
-
-        t_start = time.time()
-        if NUM_ZERO == 0:
-            # 检查缓存
-            cache_key = self._get_cache_key(id_embedding)
-            if cache_key in self._cache:
-                print("Using cached ID projections")
-                return self._cache[cache_key]
-
-            id_key = self.id_to_k(id_embedding).to(query_dtype)
-            id_value = self.id_to_v(id_embedding).to(query_dtype)
-            
-            # 直接存储在GPU上
-            self._cache[cache_key] = (id_key.to(id_embedding.device), 
-                                    id_value.to(id_embedding.device))
-            print(f"ID projection time: {time.time() - t_start:.4f}s")
-            return id_key, id_value
-        else:
-            zero_tensor = torch.zeros(
-                (id_embedding.size(0), NUM_ZERO, id_embedding.size(-1)),
-                dtype=id_embedding.dtype,
-                device=id_embedding.device,
-            )
-            cache_key = self._get_cache_key(torch.cat((id_embedding, zero_tensor), dim=1))
-            if cache_key in self._cache:
-                print("Using cached ID projections with padding")
-                return self._cache[cache_key]
-
-            id_key = self.id_to_k(torch.cat((id_embedding, zero_tensor), dim=1)).to(query_dtype)
-            id_value = self.id_to_v(torch.cat((id_embedding, zero_tensor), dim=1)).to(query_dtype)
-            
-            # 存入缓存
-            self._cache[cache_key] = (id_key.to(id_embedding.device), 
-                                    id_value.to(id_embedding.device))
-            print(f"ID projection with padding time: {time.time() - t_start:.4f}s")
-        
-        return id_key, id_value
 
     def __call__(
         self,
@@ -433,7 +379,7 @@ class IDAttnProcessor2_0(torch.nn.Module):
         # for id embedding
         if id_embedding is not None:
             t_start = time.time()
-            id_key, id_value = self._compute_id_projections(id_embedding, query.dtype)
+            id_key, id_value = id_embedding[self.key]["to_k"], id_embedding[self.key]["to_v"]
             
             t2 = time.time()
             id_key = id_key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
@@ -480,7 +426,7 @@ class IDAttnProcessor2_0(torch.nn.Module):
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
                 hidden_states = hidden_states.to(orig_dtype)
-            print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
+            # print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
             del id_key, id_value, id_hidden_states
 
         # linear proj
