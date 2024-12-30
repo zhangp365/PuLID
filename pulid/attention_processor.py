@@ -299,9 +299,9 @@ class AttnProcessor2_0(nn.Module):
 
 
 class IDAttnProcessor2_0(torch.nn.Module):
-    # 添加类级别的缓存字典
     _cache = {}
     _instance_count = 0
+    _last_embedding_key = None  # 添加类变量来记录上一次的embedding特征
 
     def __init__(self, hidden_size, cross_attention_dim=None):
         super().__init__()
@@ -316,16 +316,22 @@ class IDAttnProcessor2_0(torch.nn.Module):
         self.id_to_k = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
         self.id_to_v = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
 
-    @classmethod
-    def clear_cache(cls):
-        cls._cache.clear()
-        print("已清理 IDAttnProcessor2_0 的缓存")
-
     def _get_cache_key(self, id_embedding):
         # 创建缓存键
         return (self.instance_id, id_embedding.shape, id_embedding.sum().item())
 
+    def _get_embedding_key(self, id_embedding):
+        # 获取embedding的特征值
+        return (id_embedding.shape, id_embedding.sum().item())
+
     def _compute_id_projections(self, id_embedding, query_dtype):
+        # 检查id_embedding是否发生变化
+        current_key = self._get_embedding_key(id_embedding)
+        if IDAttnProcessor2_0._last_embedding_key is not None and current_key != IDAttnProcessor2_0._last_embedding_key:
+            print("检测到新的id_embedding，清空缓存...")
+            self._cache.clear()
+        IDAttnProcessor2_0._last_embedding_key = current_key
+
         t_start = time.time()
         if NUM_ZERO == 0:
             # 检查缓存
@@ -337,9 +343,11 @@ class IDAttnProcessor2_0(torch.nn.Module):
             id_key = self.id_to_k(id_embedding).to(query_dtype)
             id_value = self.id_to_v(id_embedding).to(query_dtype)
             
-            # 存入缓存
-            self._cache[cache_key] = (id_key, id_value)
+            # 直接存储在GPU上
+            self._cache[cache_key] = (id_key.to(id_embedding.device), 
+                                    id_value.to(id_embedding.device))
             print(f"ID projection time: {time.time() - t_start:.4f}s")
+            return id_key, id_value
         else:
             zero_tensor = torch.zeros(
                 (id_embedding.size(0), NUM_ZERO, id_embedding.size(-1)),
@@ -355,7 +363,8 @@ class IDAttnProcessor2_0(torch.nn.Module):
             id_value = self.id_to_v(torch.cat((id_embedding, zero_tensor), dim=1)).to(query_dtype)
             
             # 存入缓存
-            self._cache[cache_key] = (id_key, id_value)
+            self._cache[cache_key] = (id_key.to(id_embedding.device), 
+                                    id_value.to(id_embedding.device))
             print(f"ID projection with padding time: {time.time() - t_start:.4f}s")
         
         return id_key, id_value
