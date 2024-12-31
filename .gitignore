@@ -140,3 +140,7 @@ dmypy.json
 .pyre/
 
 .idea/
+*.jpg
+*.png
+*.safetensors
+models/*
