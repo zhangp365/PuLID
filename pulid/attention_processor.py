@@ -6,7 +6,7 @@ import time
 
 NUM_ZERO = 0
 ORTHO = False
-ORTHO_v2 = False
+ORTHO_v2 = True
 
 
 class AttnProcessor(nn.Module):
@@ -309,7 +309,7 @@ class IDAttnProcessor2_0(torch.nn.Module):\
         self.key = key
         self.hidden_size = hidden_size
 
-        print("cross_attention_dim", cross_attention_dim,"hidden_size", hidden_size)
+        # print("cross_attention_dim", cross_attention_dim,"hidden_size", hidden_size)
         self.id_to_k = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
         self.id_to_v = nn.Linear(cross_attention_dim or hidden_size, hidden_size, bias=False)
 
@@ -400,22 +400,30 @@ class IDAttnProcessor2_0(torch.nn.Module):\
             only_id_attention_time = time.time() - t2
 
             t5 = time.time()
+            attn_mean_time, projection_time, ortho_time = 0, 0, 0
             if not ORTHO and not ORTHO_v2:
                 hidden_states = hidden_states + id_scale * id_hidden_states
             elif ORTHO_v2:
                 # orig_dtype = hidden_states.dtype
                 # hidden_states = hidden_states.to(torch.bfloat16)
                 # id_hidden_states = id_hidden_states.to(torch.bfloat16)
-                attn_map = query @ id_key.transpose(-2, -1)
-                attn_mean = attn_map.softmax(dim=-1).mean(dim=1)
+                attn_map = torch.matmul(query, id_key.transpose(-2, -1))
+                attn_mean = F.softmax(attn_map, dim=-1).mean(dim=1)
                 attn_mean = attn_mean[:, :, :5].sum(dim=-1, keepdim=True)
+                attn_mean_time = time.time() - t5
+
+                t6 = time.time()
                 projection = (
                     torch.sum((hidden_states * id_hidden_states), dim=-2, keepdim=True)
                     / torch.sum((hidden_states * hidden_states), dim=-2, keepdim=True)
                     * hidden_states
                 )
+                projection_time = time.time() - t6
+
+                t7 = time.time()
                 orthogonal = id_hidden_states + (attn_mean - 1) * projection
                 hidden_states = hidden_states + id_scale * orthogonal
+                ortho_time = time.time() - t7
                 # hidden_states = hidden_states.to(orig_dtype)
             else:
                 # orig_dtype = hidden_states.dtype
@@ -429,8 +437,8 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
                 # hidden_states = hidden_states.to(orig_dtype)
-            ortho_time = time.time() - t5
-            print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s, slice_embedding_time: {slice_embedding_time:.4f}s, only_id_attention_time: {only_id_attention_time:.4f}s, ortho_time: {ortho_time:.4f}s, ORTHO: {ORTHO}, ORTHO_v2: {ORTHO_v2}")
+            ortho_total_time = time.time() - t5
+            print(f"Total ID attention time: diff: {time.time() - t_start - cross_period:.4f}s, attn_mean_time: {attn_mean_time:.4f}s, projection_time: {projection_time:.4f}s, ortho_time: {ortho_time:.4f}s, ortho_total_time: {ortho_total_time:.4f}s, ORTHO: {ORTHO}, ORTHO_v2: {ORTHO_v2}")
             # del id_key, id_value, id_hidden_states
 
         # linear proj
