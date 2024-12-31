@@ -6,7 +6,7 @@ import time
 
 NUM_ZERO = 0
 ORTHO = False
-ORTHO_v2 = True
+ORTHO_v2 = False
 
 
 class AttnProcessor(nn.Module):
@@ -102,8 +102,7 @@ class IDAttnProcessor(nn.Module):
         temb=None,
         id_embedding=None,
         id_scale=1.0,
-    ):  
-        t_start = time.time()
+    ):
         residual = hidden_states
 
         if attn.spatial_norm is not None:
@@ -141,24 +140,12 @@ class IDAttnProcessor(nn.Module):
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
 
-        cross_period = time.time() - t_start
-        # # for id-adapter
+        # for id-adapter
         if id_embedding is not None:
-
-            
-            # 记录开始时间
-            t_start = time.time()
-            
-            # 打印id_embedding信息
-            # print(f"id_embedding dtype: {id_embedding.dtype}, device: {id_embedding.device}")
-            
             if NUM_ZERO == 0:
-                t1 = time.time()
                 id_key = self.id_to_k(id_embedding)
                 id_value = self.id_to_v(id_embedding)
-                print(f"ID projection time: {time.time() - t1:.4f}s")
             else:
-                t1 = time.time()
                 zero_tensor = torch.zeros(
                     (id_embedding.size(0), NUM_ZERO, id_embedding.size(-1)),
                     dtype=id_embedding.dtype,
@@ -166,23 +153,14 @@ class IDAttnProcessor(nn.Module):
                 )
                 id_key = self.id_to_k(torch.cat((id_embedding, zero_tensor), dim=1))
                 id_value = self.id_to_v(torch.cat((id_embedding, zero_tensor), dim=1))
-                print(f"ID projection with padding time: {time.time() - t1:.4f}s")
 
-            t2 = time.time()
             id_key = attn.head_to_batch_dim(id_key).to(query.dtype)
             id_value = attn.head_to_batch_dim(id_value).to(query.dtype)
-            # print(f"Dimension transform time: {time.time() - t2:.4f}s")
 
-            t3 = time.time()
             id_attention_probs = attn.get_attention_scores(query, id_key, None)
-            # print(f"Attention score time: {time.time() - t3:.4f}s")
-
-            t4 = time.time()
             id_hidden_states = torch.bmm(id_attention_probs, id_value)
             id_hidden_states = attn.batch_to_head_dim(id_hidden_states)
-            # print(f"BMM and transform time: {time.time() - t4:.4f}s")
 
-            t5 = time.time()
             if not ORTHO:
                 hidden_states = hidden_states + id_scale * id_hidden_states
             else:
@@ -193,9 +171,6 @@ class IDAttnProcessor(nn.Module):
                 )
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
-            # print(f"Final computation time: {time.time() - t5:.4f}s")
-            
-            print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
@@ -234,6 +209,7 @@ class AttnProcessor2_0(nn.Module):
         id_scale=1.0,
     ):
         residual = hidden_states
+
         if attn.spatial_norm is not None:
             hidden_states = attn.spatial_norm(hidden_states, temb)
 
@@ -298,15 +274,23 @@ class AttnProcessor2_0(nn.Module):
         return hidden_states
 
 
-class IDAttnProcessor2_0(torch.nn.Module):\
+class IDAttnProcessor2_0(torch.nn.Module):
+    r"""
+    Attention processor for ID-Adapater for PyTorch 2.0.
+    Args:
+        hidden_size (`int`):
+            The hidden size of the attention layer.
+        cross_attention_dim (`int`):
+            The number of channels in the `encoder_hidden_states`.
+    """
 
-    def __init__(self, hidden_size, cross_attention_dim=None, key=None):
+    def __init__(self, hidden_size, cross_attention_dim=None, index_of_whole_embedding=None):
         super().__init__()
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("AttnProcessor2_0 requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
         
         # 为每个实例创建唯一标识符
-        self.key = key
+        self.index_of_whole_embedding = index_of_whole_embedding
         self.hidden_size = hidden_size
 
         # print("cross_attention_dim", cross_attention_dim,"hidden_size", hidden_size)
@@ -322,8 +306,8 @@ class IDAttnProcessor2_0(torch.nn.Module):\
         temb=None,
         id_embedding=None,
         id_scale=1.0,
+        id_mask=None,
     ):
-        t_start = time.time()
         residual = hidden_states
 
         if attn.spatial_norm is not None:
@@ -373,23 +357,17 @@ class IDAttnProcessor2_0(torch.nn.Module):\
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
-        cross_period = time.time() - t_start  # 记录cross attention时间
+
         # for id embedding
         if id_embedding is not None:
-            t_start = time.time()
             if self.hidden_size == 1280:
-                id_key, id_value = id_embedding[self.key:self.key +2,...], id_embedding[self.key+2:self.key +4,...]
+                id_key, id_value = id_embedding[self.index_of_whole_embedding:self.index_of_whole_embedding +2,...], id_embedding[self.index_of_whole_embedding+2:self.index_of_whole_embedding +4,...]
             else:
-                id_key, id_value = id_embedding[self.key:self.key +1,...], id_embedding[self.key+1:self.key +2,...]
-            slice_embedding_time = time.time() - t_start
+                id_key, id_value = id_embedding[self.index_of_whole_embedding:self.index_of_whole_embedding +1,...], id_embedding[self.index_of_whole_embedding+1:self.index_of_whole_embedding +2,...]
 
-            # print("id_key.shape", id_key.shape,"id_value.shape", id_value.shape)
-            t2 = time.time()
             id_key = id_key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
             id_value = id_value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-            # print(f"Dimension transform time: {time.time() - t2:.4f}s, id_embedding dtype: {id_embedding.dtype},query.dtype: {query.dtype}")
 
-            #t3 = time.time()
             # the output of sdp = (batch, num_heads, seq_len, head_dim)
             id_hidden_states = F.scaled_dot_product_attention(
                 query, id_key, id_value, attn_mask=None, dropout_p=0.0, is_causal=False
@@ -397,38 +375,28 @@ class IDAttnProcessor2_0(torch.nn.Module):\
 
             id_hidden_states = id_hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
             id_hidden_states = id_hidden_states.to(query.dtype)
-            only_id_attention_time = time.time() - t2
 
-            t5 = time.time()
-            attn_mean_time, projection_time, ortho_time = 0, 0, 0
             if not ORTHO and not ORTHO_v2:
                 hidden_states = hidden_states + id_scale * id_hidden_states
             elif ORTHO_v2:
-                # orig_dtype = hidden_states.dtype
-                # hidden_states = hidden_states.to(torch.bfloat16)
-                # id_hidden_states = id_hidden_states.to(torch.bfloat16)
-                attn_map = torch.matmul(query, id_key.transpose(-2, -1))
-                attn_mean = F.softmax(attn_map, dim=-1).mean(dim=1)
+                orig_dtype = hidden_states.dtype
+                hidden_states = hidden_states.to(torch.float32)
+                id_hidden_states = id_hidden_states.to(torch.float32)
+                attn_map = query @ id_key.transpose(-2, -1)
+                attn_mean = attn_map.softmax(dim=-1).mean(dim=1)
                 attn_mean = attn_mean[:, :, :5].sum(dim=-1, keepdim=True)
-                attn_mean_time = time.time() - t5
-
-                t6 = time.time()
                 projection = (
                     torch.sum((hidden_states * id_hidden_states), dim=-2, keepdim=True)
                     / torch.sum((hidden_states * hidden_states), dim=-2, keepdim=True)
                     * hidden_states
                 )
-                projection_time = time.time() - t6
-
-                t7 = time.time()
                 orthogonal = id_hidden_states + (attn_mean - 1) * projection
                 hidden_states = hidden_states + id_scale * orthogonal
-                ortho_time = time.time() - t7
-                # hidden_states = hidden_states.to(orig_dtype)
+                hidden_states = hidden_states.to(orig_dtype)
             else:
-                # orig_dtype = hidden_states.dtype
-                # hidden_states = hidden_states.to(torch.float32)
-                # id_hidden_states = id_hidden_states.to(torch.float32)
+                orig_dtype = hidden_states.dtype
+                hidden_states = hidden_states.to(torch.float32)
+                id_hidden_states = id_hidden_states.to(torch.float32)
                 projection = (
                     torch.sum((hidden_states * id_hidden_states), dim=-2, keepdim=True)
                     / torch.sum((hidden_states * hidden_states), dim=-2, keepdim=True)
@@ -436,10 +404,7 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 )
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
-                # hidden_states = hidden_states.to(orig_dtype)
-            ortho_total_time = time.time() - t5
-            print(f"Total ID attention time: diff: {time.time() - t_start - cross_period:.4f}s, attn_mean_time: {attn_mean_time:.4f}s, projection_time: {projection_time:.4f}s, ortho_time: {ortho_time:.4f}s, ortho_total_time: {ortho_total_time:.4f}s, ORTHO: {ORTHO}, ORTHO_v2: {ORTHO_v2}")
-            # del id_key, id_value, id_hidden_states
+                hidden_states = hidden_states.to(orig_dtype)
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
