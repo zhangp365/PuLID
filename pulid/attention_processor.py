@@ -403,9 +403,9 @@ class IDAttnProcessor2_0(torch.nn.Module):\
             if not ORTHO and not ORTHO_v2:
                 hidden_states = hidden_states + id_scale * id_hidden_states
             elif ORTHO_v2:
-                orig_dtype = hidden_states.dtype
-                hidden_states = hidden_states.to(torch.float32)
-                id_hidden_states = id_hidden_states.to(torch.float32)
+                # orig_dtype = hidden_states.dtype
+                # hidden_states = hidden_states.to(torch.bfloat16)
+                # id_hidden_states = id_hidden_states.to(torch.bfloat16)
                 attn_map = query @ id_key.transpose(-2, -1)
                 attn_mean = attn_map.softmax(dim=-1).mean(dim=1)
                 attn_mean = attn_mean[:, :, :5].sum(dim=-1, keepdim=True)
@@ -416,11 +416,11 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 )
                 orthogonal = id_hidden_states + (attn_mean - 1) * projection
                 hidden_states = hidden_states + id_scale * orthogonal
-                hidden_states = hidden_states.to(orig_dtype)
+                # hidden_states = hidden_states.to(orig_dtype)
             else:
-                orig_dtype = hidden_states.dtype
-                hidden_states = hidden_states.to(torch.float32)
-                id_hidden_states = id_hidden_states.to(torch.float32)
+                # orig_dtype = hidden_states.dtype
+                # hidden_states = hidden_states.to(torch.float32)
+                # id_hidden_states = id_hidden_states.to(torch.float32)
                 projection = (
                     torch.sum((hidden_states * id_hidden_states), dim=-2, keepdim=True)
                     / torch.sum((hidden_states * hidden_states), dim=-2, keepdim=True)
@@ -428,9 +428,9 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 )
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
-                hidden_states = hidden_states.to(orig_dtype)
+                # hidden_states = hidden_states.to(orig_dtype)
             print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
-            del id_key, id_value, id_hidden_states
+            # del id_key, id_value, id_hidden_states
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
