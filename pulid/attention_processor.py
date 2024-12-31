@@ -381,6 +381,7 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 id_key, id_value = id_embedding[self.key:self.key +2,...], id_embedding[self.key+2:self.key +4,...]
             else:
                 id_key, id_value = id_embedding[self.key:self.key +1,...], id_embedding[self.key+1:self.key +2,...]
+            slice_embedding_time = time.time() - t_start
 
             # print("id_key.shape", id_key.shape,"id_value.shape", id_value.shape)
             t2 = time.time()
@@ -396,10 +397,9 @@ class IDAttnProcessor2_0(torch.nn.Module):\
 
             id_hidden_states = id_hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
             id_hidden_states = id_hidden_states.to(query.dtype)
-            # print(f"scaled_dot_product_attention time: {time.time() - t3:.4f}s")
-            print(f"only ID attention time: {time.time() - t2:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t2 - cross_period:.4f}s")
+            only_id_attention_time = time.time() - t2
 
-            #t5 = time.time()
+            t5 = time.time()
             if not ORTHO and not ORTHO_v2:
                 hidden_states = hidden_states + id_scale * id_hidden_states
             elif ORTHO_v2:
@@ -429,7 +429,8 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
                 # hidden_states = hidden_states.to(orig_dtype)
-            print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
+            ortho_time = time.time() - t5
+            print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s, slice_embedding_time: {slice_embedding_time:.4f}s, only_id_attention_time: {only_id_attention_time:.4f}s, ortho_time: {ortho_time:.4f}s, ORTHO: {ORTHO}, ORTHO_v2: {ORTHO_v2}")
             # del id_key, id_value, id_hidden_states
 
         # linear proj
