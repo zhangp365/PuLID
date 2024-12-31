@@ -388,7 +388,7 @@ class IDAttnProcessor2_0(torch.nn.Module):\
             id_value = id_value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
             # print(f"Dimension transform time: {time.time() - t2:.4f}s, id_embedding dtype: {id_embedding.dtype},query.dtype: {query.dtype}")
 
-            t3 = time.time()
+            #t3 = time.time()
             # the output of sdp = (batch, num_heads, seq_len, head_dim)
             id_hidden_states = F.scaled_dot_product_attention(
                 query, id_key, id_value, attn_mask=None, dropout_p=0.0, is_causal=False
@@ -397,8 +397,9 @@ class IDAttnProcessor2_0(torch.nn.Module):\
             id_hidden_states = id_hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
             id_hidden_states = id_hidden_states.to(query.dtype)
             # print(f"scaled_dot_product_attention time: {time.time() - t3:.4f}s")
+            print(f"only ID attention time: {time.time() - t2:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t2 - cross_period:.4f}s")
 
-            t5 = time.time()
+            #t5 = time.time()
             if not ORTHO and not ORTHO_v2:
                 hidden_states = hidden_states + id_scale * id_hidden_states
             elif ORTHO_v2:
@@ -428,7 +429,7 @@ class IDAttnProcessor2_0(torch.nn.Module):\
                 orthogonal = id_hidden_states - projection
                 hidden_states = hidden_states + id_scale * orthogonal
                 hidden_states = hidden_states.to(orig_dtype)
-            # print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
+            print(f"Total ID attention time: {time.time() - t_start:.4f}s, cross_period: {cross_period:.4f}s, diff: {time.time() - t_start - cross_period:.4f}s")
             del id_key, id_value, id_hidden_states
 
         # linear proj
