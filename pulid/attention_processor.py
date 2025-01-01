@@ -207,6 +207,7 @@ class AttnProcessor2_0(nn.Module):
         temb=None,
         id_embedding=None,
         id_scale=1.0,
+        id_mask=None,
     ):
         residual = hidden_states
 

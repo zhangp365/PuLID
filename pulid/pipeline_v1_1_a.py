@@ -295,7 +295,7 @@ class PuLIDPipeline:
         t_preprocess_end = time.time()
         print(f"预处理时间: {t_preprocess_end - t_preprocess_start:.2f}秒")
 
-        latents, t_generate_end = self.new_method(prompt, height, width, negative_prompt, guidance_scale, num_inference_steps, seed, id_embedding, uncond_id_embedding, id_scale)
+        latents, t_generate_end = self.generate_latent(prompt, height, width, negative_prompt, guidance_scale, num_inference_steps, seed, id_embedding, uncond_id_embedding, id_scale)
         
         # 解码latent到图像
         images = self.pipe.vae.decode(latents / self.pipe.vae.config.scaling_factor, return_dict=False)[0]
@@ -338,5 +338,5 @@ if __name__ == "__main__":
     # 读取图片并转换为RGB格式
     image = cv2.imread('pulid/test.png')
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    result = pipeline.inference(prompt='a beautiful girl', id_images=[image], id_scale=1.0, num_inference_steps=2, guidance_scale=7, ortho='')
-    result[0].save('result3.png')
+    result = pipeline.inference(prompt='a beautiful girl', id_images=[image], id_scale=1.0, num_inference_steps=20, guidance_scale=7, ortho='', seed=42)
+    result[0].save('result4.png')
