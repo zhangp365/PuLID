@@ -1,5 +1,6 @@
 import gc
-
+import sys
+sys.path.append('.')
 import cv2
 import insightface
 import numpy as np
@@ -322,3 +323,14 @@ class PuLIDPipeline:
         images = self.pipe.image_processor.postprocess(images, output_type='pil')
 
         return images
+    
+
+if __name__ == "__main__":
+    pipeline = PuLIDPipeline(sdxl_repo='RunDiffusion/Juggernaut-XL-v9', sampler='dpmpp_2m')
+   
+    # 读取图片并转换为RGB格式
+    image = cv2.imread('pulid/test.png')
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    uncond_id_embedding, id_embedding = pipeline.get_id_embedding([image])
+    result = pipeline.inference(prompt='a beautiful girl',size=(1, 1024, 1024), id_scale=1.0, steps=20, guidance_scale=7, seed=42, uncond_id_embedding=uncond_id_embedding, id_embedding=id_embedding)
+    result[0].save('result4_original.png')   

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-NUM_ZERO = 0
+NUM_ZERO = 8
 ORTHO = False
 ORTHO_v2 = False
 
