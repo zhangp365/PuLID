@@ -303,6 +303,7 @@ class PuLIDPipeline:
         
         # 解码latent到图像
         images = self.pipe.vae.decode(latents / self.pipe.vae.config.scaling_factor, return_dict=False)[0]
+        images = images.detach().cpu()
         images = self.pipe.image_processor.postprocess(images, output_type="pil")
         
         # 解码结束时间
