@@ -43,6 +43,11 @@ class PuLIDPipeline:
         self.pipe.watermark = None
         self.hack_unet_attn_layers(self.pipe.unet)
 
+
+        # scheduler
+        self.pipe.scheduler = DPMSolverMultistepScheduler.from_config(self.pipe.scheduler.config)
+        print(self.pipe.scheduler)
+        
         # ID adapters
         self.id_adapter = IDFormer()
 

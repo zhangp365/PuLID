@@ -7,7 +7,7 @@ import insightface
 import numpy as np
 import torch
 import torch.nn as nn
-from diffusers import StableDiffusionXLPipeline
+from diffusers import DPMSolverMultistepScheduler, StableDiffusionXLPipeline
 from facexlib.parsing import init_parsing_model
 from facexlib.utils.face_restoration_helper import FaceRestoreHelper
 
@@ -44,6 +44,10 @@ class PuLIDPipeline:
         self.pipe = StableDiffusionXLPipeline.from_pretrained(sdxl_repo, torch_dtype=torch.bfloat16, variant="fp16").to(device)
         self.pipe.watermark = None
         self.hack_unet_attn_layers(self.pipe.unet)
+
+        # scheduler
+        self.pipe.scheduler = DPMSolverMultistepScheduler.from_config(self.pipe.scheduler.config, use_karras_sigmas=True, algorithm_type="dpmsolver++")
+        print(self.pipe.scheduler)
 
         # ID adapters
         self.id_adapter = IDFormer()
@@ -272,7 +276,7 @@ class PuLIDPipeline:
         num_inference_steps=4,
         seed=-1,
         num_zero=8,
-        ortho='v2',
+        ortho='',
     ):
         # 预处理开始时间
         t_preprocess_start = time.time()
